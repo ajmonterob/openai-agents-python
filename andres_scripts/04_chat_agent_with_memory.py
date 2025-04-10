@@ -1,21 +1,95 @@
+"""
+Chat Agent con Primer Intento de Memoria
+
+Este script representa un primer intento de implementar memoria en el chat,
+aunque con limitaciones importantes en la compartición de contexto entre agentes.
+
+Características Principales:
+1. Sistema de Memoria (Con Limitaciones):
+   - Implementa un contexto (ChatMemoryContext)
+   - Intenta mantener historial de conversación
+   - ⚠️ La memoria no se comparte efectivamente entre agentes durante handoffs
+   - ⚠️ Cada agente pierde contexto al recibir el control
+
+2. Sistema de Handoff Básico:
+   - Triage agent para detección de idioma
+   - Intento de transferencia de contexto
+   - ⚠️ El contexto se pierde durante los handoffs
+   - ⚠️ Los agentes no mantienen coherencia entre cambios
+
+3. Sistema de Debugging:
+   - Hooks para monitoreo de eventos
+   - Trazabilidad de handoffs
+   - Ayuda a identificar problemas de memoria
+   - Muestra pérdida de contexto entre agentes
+
+4. Limitaciones Identificadas:
+   - La memoria no persiste efectivamente entre handoffs
+   - Los agentes no pueden acceder al historial completo
+   - Las respuestas pierden coherencia entre cambios de idioma
+   - El sistema de handoff no preserva el contexto
+
+Evolución del Código:
+- chat_agent_basic (03): Sin sistema de memoria
+- chat_agent_with_memory (04): Primer intento de memoria [ACTUAL]
+  * Introduce el concepto de contexto compartido
+  * Identifica problemas de pérdida de memoria
+  * Sienta las bases para mejoras futuras
+- chat_agent_with_unified_memory (05): Resuelve problemas de memoria
+- Versiones posteriores: Mejoran el control y coherencia
+
+Lecciones Aprendidas:
+1. La implementación básica de RunConfig no es suficiente
+2. Se necesita un sistema más robusto de preservación de contexto
+3. Los handoffs deben manejar mejor la transferencia de estado
+4. El debugging ayuda a identificar pérdidas de memoria
+
+Autor: Andres Montero
+Fecha: Marzo 2024
+"""
+
 import asyncio
 from dataclasses import dataclass, field
 from typing import List
 from pydantic import BaseModel
 from agents import Agent, Runner, function_tool, RunConfig, HandoffInputData, RunContextWrapper, RunHooks, Tool
 
-# Definir el contexto que compartirán los agentes
 @dataclass
 class ChatMemoryContext:
+    """
+    Primer intento de sistema de memoria compartida.
+    
+    ⚠️ Limitaciones Conocidas:
+    1. El contexto no se preserva efectivamente durante handoffs
+    2. Los agentes pierden acceso al historial previo
+    3. No hay verdadera compartición de memoria entre agentes
+    
+    Esta implementación sirve principalmente para:
+    - Identificar problemas de pérdida de contexto
+    - Establecer base para futuras mejoras
+    - Demostrar necesidad de un sistema más robusto
+    
+    Attributes:
+        conversation_history (List[dict]): Lista de mensajes que intenta
+        mantener el historial, pero se pierde durante handoffs
+    """
     conversation_history: List[dict] = field(default_factory=list)
     
     def add_message(self, role: str, content: str):
+        """
+        Agrega un mensaje al historial.
+        Nota: Este historial se perderá durante handoffs.
+        """
         self.conversation_history.append({
             "role": role,
             "content": content
         })
     
     def get_history_as_string(self) -> str:
+        """
+        Obtiene el historial como texto.
+        Nota: Solo contiene mensajes desde el último handoff.
+        """
         history = []
         for msg in self.conversation_history:
             history.append(f"{msg['role']}: {msg['content']}")
@@ -126,7 +200,17 @@ def create_triage_agent(spanish_agent: Agent, english_agent: Agent):
 
 # Hooks para debugging
 class ChatHooks(RunHooks[ChatMemoryContext]):
+    """
+    Sistema de hooks para debugging y monitoreo.
+    
+    Especialmente útil para:
+    - Identificar pérdidas de contexto durante handoffs
+    - Monitorear el estado de la memoria
+    - Detectar problemas de coherencia
+    - Verificar fallos en la transferencia de estado
+    """
     async def on_agent_start(self, context: RunContextWrapper[ChatMemoryContext], agent: Agent[ChatMemoryContext]) -> None:
+        """Monitorea el inicio de un agente y el estado del contexto"""
         print(f"\n[DEBUG] Starting agent: {agent.name}")
         if context.context and context.context.conversation_history:
             print(f"[DEBUG] Current history size: {len(context.context.conversation_history)} messages")
@@ -150,6 +234,30 @@ class ChatHooks(RunHooks[ChatMemoryContext]):
         print(f"[DEBUG] Tool result: {result}")
 
 async def chat():
+    """
+    Función principal del chat con primer intento de memoria.
+    
+    ⚠️ Limitaciones Conocidas:
+    1. La memoria se pierde entre handoffs
+    2. No hay verdadera coherencia entre agentes
+    3. El contexto no se preserva completamente
+    
+    Flujo de Ejecución:
+    1. Inicialización:
+       - Crea contexto (que se perderá en handoffs)
+       - Configura agentes (sin memoria efectiva)
+       - Establece sistema básico de handoff
+       
+    2. Ciclo Principal:
+       - Procesa input del usuario
+       - Intenta mantener historial
+       - Realiza handoffs (perdiendo contexto)
+       
+    3. Áreas de Mejora Identificadas:
+       - Preservación de memoria entre handoffs
+       - Coherencia entre cambios de idioma
+       - Sistema de contexto más robusto
+    """
     print("\n¡Bienvenido al Chat Interactivo con Memoria!")
     print("Puedes escribir en español o inglés.")
     print("El chat recordará la conversación anterior.")
