@@ -1,95 +1,41 @@
 """
-Chat Agent con Primer Intento de Memoria
+⚠️ IMPORTANTE: Este script necesita correcciones y no está funcionando correctamente.
+Problemas conocidos:
+1. La memoria no se mantiene correctamente entre agentes
+2. La detección de idioma no es precisa
+3. Los handoffs no preservan el contexto adecuadamente
 
-Este script representa un primer intento de implementar memoria en el chat,
-aunque con limitaciones importantes en la compartición de contexto entre agentes.
-
-Características Principales:
-1. Sistema de Memoria (Con Limitaciones):
-   - Implementa un contexto (ChatMemoryContext)
-   - Intenta mantener historial de conversación
-   - ⚠️ La memoria no se comparte efectivamente entre agentes durante handoffs
-   - ⚠️ Cada agente pierde contexto al recibir el control
-
-2. Sistema de Handoff Básico:
-   - Triage agent para detección de idioma
-   - Intento de transferencia de contexto
-   - ⚠️ El contexto se pierde durante los handoffs
-   - ⚠️ Los agentes no mantienen coherencia entre cambios
-
-3. Sistema de Debugging:
-   - Hooks para monitoreo de eventos
-   - Trazabilidad de handoffs
-   - Ayuda a identificar problemas de memoria
-   - Muestra pérdida de contexto entre agentes
-
-4. Limitaciones Identificadas:
-   - La memoria no persiste efectivamente entre handoffs
-   - Los agentes no pueden acceder al historial completo
-   - Las respuestas pierden coherencia entre cambios de idioma
-   - El sistema de handoff no preserva el contexto
-
-Evolución del Código:
-- chat_agent_basic (03): Sin sistema de memoria
-- chat_agent_with_memory (04): Primer intento de memoria [ACTUAL]
-  * Introduce el concepto de contexto compartido
-  * Identifica problemas de pérdida de memoria
-  * Sienta las bases para mejoras futuras
-- chat_agent_with_unified_memory (05): Resuelve problemas de memoria
-- Versiones posteriores: Mejoran el control y coherencia
-
-Lecciones Aprendidas:
-1. La implementación básica de RunConfig no es suficiente
-2. Se necesita un sistema más robusto de preservación de contexto
-3. Los handoffs deben manejar mejor la transferencia de estado
-4. El debugging ayuda a identificar pérdidas de memoria
+Este script es un intento de implementar memoria segregada por agente, pero requiere
+una revisión y reestructuración completa para funcionar como se espera.
 
 Autor: Andres Montero
 Fecha: Marzo 2024
 """
 
-import asyncio
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Dict, Optional
+import asyncio
 from pydantic import BaseModel
-from agents import Agent, Runner, function_tool, RunConfig, HandoffInputData, RunContextWrapper, RunHooks, Tool
+from agents import Agent, Runner, function_tool, RunConfig, HandoffInputData, RunContextWrapper, RunHooks, Tool, ModelSettings
+
 
 @dataclass
-class ChatMemoryContext:
+class AgentMemoryContext:
     """
-    Primer intento de sistema de memoria compartida.
-    
-    ⚠️ Limitaciones Conocidas:
-    1. El contexto no se preserva efectivamente durante handoffs
-    2. Los agentes pierden acceso al historial previo
-    3. No hay verdadera compartición de memoria entre agentes
-    
-    Esta implementación sirve principalmente para:
-    - Identificar problemas de pérdida de contexto
-    - Establecer base para futuras mejoras
-    - Demostrar necesidad de un sistema más robusto
-    
-    Attributes:
-        conversation_history (List[dict]): Lista de mensajes que intenta
-        mantener el historial, pero se pierde durante handoffs
+    Contexto de memoria para un agente específico.
+    Mantiene el historial de conversación para un solo idioma.
     """
     conversation_history: List[dict] = field(default_factory=list)
     
     def add_message(self, role: str, content: str):
-        """
-        Agrega un mensaje al historial.
-        Nota: Este historial se perderá durante handoffs.
-        """
         self.conversation_history.append({
             "role": role,
             "content": content
         })
+        print(f"[debug] Agregando mensaje al historial del agente: {role}: {content}")
+        print(f"[debug] Total de mensajes en el historial: {len(self.conversation_history)}")
     
     def get_history_as_string(self) -> str:
-        """
-        Obtiene el historial como texto.
-        Nota: Solo contiene mensajes desde el último handoff.
-        """
         history = []
         for msg in self.conversation_history:
             history.append(f"{msg['role']}: {msg['content']}")
@@ -108,7 +54,7 @@ class CalculatorResult(BaseModel):
 # Herramienta para obtener el clima
 @function_tool
 def get_weather(city: str) -> Weather:
-    print(f"[debug] get_weather called for {city}")
+    print(f"[debug] Consultando el clima para la ciudad: {city}")
     return Weather(
         city=city,
         temperature_range="14-20C",
@@ -118,28 +64,30 @@ def get_weather(city: str) -> Weather:
 # Herramienta para cálculos matemáticos
 @function_tool
 def calculate(operation: str) -> CalculatorResult:
-    print(f"[debug] calculate called for {operation}")
+    print(f"[debug] Realizando cálculo: {operation}")
     try:
         result = eval(operation)
+        print(f"[debug] Resultado del cálculo: {result}")
         return CalculatorResult(operation=operation, result=result)
     except Exception as e:
+        print(f"[debug] Error en el cálculo: {str(e)}")
         return CalculatorResult(operation=operation, result=float('nan'))
 
 def create_spanish_agent():
-    return Agent[ChatMemoryContext](
+    return Agent[AgentMemoryContext](
         name="Spanish Assistant",
         instructions="""Eres un asistente amigable que habla español.
         Debes responder SIEMPRE en español.
         
-        IMPORTANTE: Tienes acceso al historial de la conversación en context.conversation_history
-        DEBES revisar el historial completo antes de responder para mantener coherencia.
+        IMPORTANTE: Tienes acceso al historial de conversación en español.
+        DEBES revisar el historial antes de responder para mantener coherencia.
         
-        Para cada mensaje en context.conversation_history:
-        - El campo 'role' puede ser 'user' o 'assistant'
-        - El campo 'content' contiene el mensaje
+        Para cada mensaje en el historial:
+        - El formato es "role: content"
+        - El role puede ser "user" o "assistant"
         
         ANTES de responder:
-        1. Lee TODO el historial de la conversación en context.conversation_history
+        1. Lee el historial de la conversación usando context.get_history_as_string()
         2. Busca información relevante como nombres, datos o contexto previo
         3. Asegúrate de que tu respuesta sea coherente con toda la conversación anterior
         4. Si te preguntan por algo mencionado antes, DEBES buscarlo en el historial
@@ -149,25 +97,25 @@ def create_spanish_agent():
         - Hacer cálculos matemáticos usando la herramienta calculate
         - Mantener conversaciones amigables
         - Ayudar con preguntas generales
-        """,
-        tools=[get_weather, calculate],
+        - Recordar información mencionada anteriormente en la conversación""",
+        tools=[get_weather, calculate]
     )
 
 def create_english_agent():
-    return Agent[ChatMemoryContext](
+    return Agent[AgentMemoryContext](
         name="English Assistant",
         instructions="""You are a friendly assistant that speaks English.
         You must ALWAYS respond in English.
         
-        IMPORTANT: You have access to the conversation history in context.conversation_history
-        You MUST review the complete history before responding to maintain coherence.
+        IMPORTANT: You have access to the English conversation history.
+        You MUST review the history before responding to maintain coherence.
         
-        For each message in context.conversation_history:
-        - The 'role' field can be 'user' or 'assistant'
-        - The 'content' field contains the message
+        For each message in the history:
+        - The format is "role: content"
+        - The role can be "user" or "assistant"
         
         BEFORE responding:
-        1. Read ALL the conversation history in context.conversation_history
+        1. Read the conversation history using context.get_history_as_string()
         2. Look for relevant information like names, data, or previous context
         3. Ensure your response is coherent with all previous conversation
         4. If asked about something mentioned before, you MUST look it up in the history
@@ -177,140 +125,120 @@ def create_english_agent():
         - Perform mathematical calculations using the calculate tool
         - Engage in friendly conversations
         - Help with general questions
-        """,
-        tools=[get_weather, calculate],
+        - Remember information mentioned earlier in the conversation""",
+        tools=[get_weather, calculate]
     )
 
-def create_triage_agent(spanish_agent: Agent, english_agent: Agent):
-    return Agent[ChatMemoryContext](
+def create_triage_agent(spanish_agent: Agent[AgentMemoryContext], english_agent: Agent[AgentMemoryContext]) -> Agent[AgentMemoryContext]:
+    return Agent[AgentMemoryContext](
         name="Triage Assistant",
-        instructions="""You are a language detection assistant.
-        Your ONLY job is to detect the language and handoff to the appropriate agent.
-        
-        Rules for language detection:
-        1. If the input contains Spanish words or characters (á, é, í, ó, ú, ñ, ¿, ¡), handoff to spanish_agent
-        2. If the input contains English words, handoff to english_agent
-        3. If both languages are detected, prioritize Spanish
-        4. If no language is clearly detected, handoff to english_agent
-        
-        DO NOT respond to the user directly. ONLY detect the language and handoff.
-        """,
-        handoffs=[spanish_agent, english_agent],
+        instructions="""Eres un agente de triaje que detecta el idioma del usuario.
+        Si detectas español, transfiere la conversación al Asistente Español.
+        Si detectas inglés, transfiere la conversación al English Assistant.
+        Si detectas ambos idiomas, prioriza el español.
+        No respondas directamente, solo transfiere la conversación.""",
+        handoffs=[spanish_agent, english_agent]
     )
 
 # Hooks para debugging
-class ChatHooks(RunHooks[ChatMemoryContext]):
+class ChatHooks(RunHooks[AgentMemoryContext]):
     """
     Sistema de hooks para debugging y monitoreo.
-    
-    Especialmente útil para:
-    - Identificar pérdidas de contexto durante handoffs
-    - Monitorear el estado de la memoria
-    - Detectar problemas de coherencia
-    - Verificar fallos en la transferencia de estado
+    Monitorea el estado de memoria y el flujo de la conversación.
     """
-    async def on_agent_start(self, context: RunContextWrapper[ChatMemoryContext], agent: Agent[ChatMemoryContext]) -> None:
-        """Monitorea el inicio de un agente y el estado del contexto"""
-        print(f"\n[DEBUG] Starting agent: {agent.name}")
-        if context.context and context.context.conversation_history:
-            print(f"[DEBUG] Current history size: {len(context.context.conversation_history)} messages")
-            print("[DEBUG] Last message:", context.context.conversation_history[-1])
+    async def on_agent_start(self, context: RunContextWrapper[AgentMemoryContext], agent: Agent[AgentMemoryContext]) -> None:
+        print(f"\n[debug] Iniciando agente: {agent.name}")
+        if context.context:
+            print(f"[debug] Historial actual ({len(context.context.conversation_history)} mensajes):")
+            print(context.context.get_history_as_string())
 
-    async def on_agent_end(self, context: RunContextWrapper[ChatMemoryContext], agent: Agent[ChatMemoryContext], output: str) -> None:
-        print(f"\n[DEBUG] Agent {agent.name} finished")
-        print(f"[DEBUG] Output: {output}")
+    async def on_agent_end(self, context: RunContextWrapper[AgentMemoryContext], agent: Agent[AgentMemoryContext], output: str) -> None:
+        print(f"\n[debug] Agente {agent.name} completó su tarea")
+        print(f"[debug] Respuesta generada: {output}")
 
-    async def on_handoff(self, context: RunContextWrapper[ChatMemoryContext], from_agent: Agent[ChatMemoryContext], to_agent: Agent[ChatMemoryContext]) -> None:
-        print(f"\n[DEBUG] Handoff from {from_agent.name} to {to_agent.name}")
-        if context.context and context.context.conversation_history:
-            print(f"[DEBUG] History being passed: {len(context.context.conversation_history)} messages")
-            print("[DEBUG] Last message:", context.context.conversation_history[-1])
+    async def on_handoff(self, context: RunContextWrapper[AgentMemoryContext], from_agent: Agent[AgentMemoryContext], to_agent: Agent[AgentMemoryContext]) -> None:
+        print(f"\n[debug] Transferencia de control: {from_agent.name} -> {to_agent.name}")
+        if context.context:
+            print(f"[debug] Historial actual ({len(context.context.conversation_history)} mensajes):")
+            print(context.context.get_history_as_string())
 
-    async def on_tool_start(self, context: RunContextWrapper[ChatMemoryContext], agent: Agent[ChatMemoryContext], tool: Tool) -> None:
-        print(f"\n[DEBUG] Agent {agent.name} starting tool: {tool.name}")
+    async def on_tool_start(self, context: RunContextWrapper[AgentMemoryContext], agent: Agent[AgentMemoryContext], tool: Tool) -> None:
+        print(f"\n[debug] Agente {agent.name} está usando la herramienta: {tool.name}")
 
-    async def on_tool_end(self, context: RunContextWrapper[ChatMemoryContext], agent: Agent[ChatMemoryContext], tool: Tool, result: str) -> None:
-        print(f"\n[DEBUG] Agent {agent.name} finished tool: {tool.name}")
-        print(f"[DEBUG] Tool result: {result}")
+    async def on_tool_end(self, context: RunContextWrapper[AgentMemoryContext], agent: Agent[AgentMemoryContext], tool: Tool, result: str) -> None:
+        print(f"\n[debug] Herramienta {tool.name} completada por {agent.name}")
+        print(f"[debug] Resultado obtenido: {result}")
+
+# Función para preservar el contexto durante los handoffs
+def memory_handoff_filter(input_data: HandoffInputData) -> HandoffInputData:
+    return HandoffInputData(
+        input_history=input_data.input_history,
+        pre_handoff_items=input_data.pre_handoff_items,
+        new_items=input_data.new_items
+    )
 
 async def chat():
     """
-    Función principal del chat con primer intento de memoria.
-    
-    ⚠️ Limitaciones Conocidas:
-    1. La memoria se pierde entre handoffs
-    2. No hay verdadera coherencia entre agentes
-    3. El contexto no se preserva completamente
-    
-    Flujo de Ejecución:
-    1. Inicialización:
-       - Crea contexto (que se perderá en handoffs)
-       - Configura agentes (sin memoria efectiva)
-       - Establece sistema básico de handoff
-       
-    2. Ciclo Principal:
-       - Procesa input del usuario
-       - Intenta mantener historial
-       - Realiza handoffs (perdiendo contexto)
-       
-    3. Áreas de Mejora Identificadas:
-       - Preservación de memoria entre handoffs
-       - Coherencia entre cambios de idioma
-       - Sistema de contexto más robusto
+    Función principal del chat con memoria segregada por idioma.
     """
-    print("\n¡Bienvenido al Chat Interactivo con Memoria!")
-    print("Puedes escribir en español o inglés.")
-    print("El chat recordará la conversación anterior.")
-    print("Escribe 'exit' para salir.\n")
-    
-    # Crear el contexto compartido
-    context = ChatMemoryContext()
-    
     # Crear los agentes
     spanish_agent = create_spanish_agent()
     english_agent = create_english_agent()
     triage_agent = create_triage_agent(spanish_agent, english_agent)
     
-    # Configurar el RunConfig para mantener el contexto
-    def handoff_filter(handoff_input_data: HandoffInputData) -> HandoffInputData:
-        return HandoffInputData(
-            input_history=handoff_input_data.input_history,
-            pre_handoff_items=[],  # No necesitamos items anteriores
-            new_items=[]  # No necesitamos nuevos items
-        )
+    # Crear contextos específicos para cada agente
+    spanish_context = AgentMemoryContext()
+    english_context = AgentMemoryContext()
     
-    # Crear los hooks de debugging
-    hooks = ChatHooks()
-    
+    # Configurar RunConfig
     run_config = RunConfig(
-        workflow_name="chat_with_memory",
-        handoff_input_filter=handoff_filter
+        model="gpt-4-turbo-preview",
+        model_settings=ModelSettings(temperature=0.7)
     )
     
+    print("¡Bienvenido! Puedes escribir en español o inglés. Escribe 'exit' para salir.")
+    
     while True:
-        user_input = input("Tú: ")
-        
+        user_input = input("> ")
         if user_input.lower() == 'exit':
-            print("\n¡Hasta luego! 👋")
             break
+            
+        # Determinar el idioma y usar el contexto correspondiente
+        is_spanish = any(c in user_input.lower() for c in ['á', 'é', 'í', 'ó', 'ú', 'ñ', '¿', '¡']) or \
+                    any(word in user_input.lower() for word in ['hola', 'como', 'estas', 'que', 'cual', 'donde', 'cuando', 'por', 'para'])
         
-        # Agregar el mensaje del usuario al historial
+        if is_spanish:
+            context = spanish_context
+            agent = spanish_agent
+            print("[debug] Usando agente en español")
+        else:
+            context = english_context
+            agent = english_agent
+            print("[debug] Usando agente en inglés")
+            
+        # Agregar el mensaje del usuario al contexto correspondiente
         context.add_message("user", user_input)
-        
-        # Ejecutar el agente con el contexto y los hooks
+            
+        # Ejecutar el agente con su contexto específico
         result = await Runner.run(
-            triage_agent,
+            agent,
             input=user_input,
             context=context,
-            run_config=run_config,
-            hooks=hooks
+            run_config=run_config
         )
         
-        # Agregar la respuesta del asistente al historial
-        context.add_message("assistant", result.final_output)
+        # Extraer solo el texto de la respuesta
+        response_text = result.final_output if hasattr(result, 'final_output') else str(result)
         
-        print("\nAsistente:", result.final_output)
-        print()
+        # Agregar la respuesta al contexto
+        context.add_message("assistant", response_text)
+        
+        # Mostrar la respuesta
+        print(response_text)
+        
+        # Mostrar el historial actual del agente
+        print(f"\n[debug] Historial del agente ({len(context.conversation_history)} mensajes):")
+        print(context.get_history_as_string())
 
 if __name__ == "__main__":
     asyncio.run(chat()) 

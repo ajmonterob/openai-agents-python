@@ -20,6 +20,7 @@ Test simple:
 import asyncio
 from agents import Agent, Runner
 
+
 # Crear el agente en español
 spanish_agent = Agent(
     name="Spanish agent",

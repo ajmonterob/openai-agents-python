@@ -1,3 +1,54 @@
+"""
+Chat Agent con Memoria Unificada
+
+Este script implementa un sistema de chat multilingüe con memoria unificada,
+donde todos los agentes comparten el mismo contexto de conversación.
+
+Objetivo:
+- Demostrar cómo implementar un sistema de memoria compartida entre agentes
+- Mantener la coherencia de la conversación independientemente del idioma
+- Preservar el contexto durante los handoffs entre agentes
+
+Características Principales:
+1. Sistema de Memoria Unificada:
+   - Un solo contexto compartido entre todos los agentes
+   - Historial de conversación accesible por todos los agentes
+   - Coherencia mantenida a través de cambios de idioma
+
+2. Sistema de Handoff con Contexto Compartido:
+   - Triage agent para detección de idioma
+   - Preservación del contexto durante handoffs
+   - Transiciones suaves entre idiomas
+
+3. Instrucciones Dinámicas:
+   - Cada agente recibe el historial completo en tiempo real
+   - Respuestas coherentes con toda la conversación
+   - Mantenimiento de contexto entre idiomas
+
+4. Herramientas y Funcionalidades:
+   - Consulta del clima
+   - Cálculos matemáticos
+   - Conversación multilingüe
+   - Memoria persistente
+
+Evolución del Código:
+- chat_agent_basic (03): Sin sistema de memoria
+- chat_agent_with_memory (04): Memoria segregada por idioma [NO FUNCIONAL]
+- chat_agent_with_unified_memory (05): Memoria unificada [ACTUAL]
+  * Implementa memoria compartida entre agentes
+  * Mantiene coherencia en conversaciones multilingües
+  * Preserva contexto durante handoffs
+
+Lecciones Aprendidas:
+1. La memoria unificada es más efectiva para conversaciones multilingües
+2. El contexto compartido mejora la experiencia del usuario
+3. Los handoffs deben preservar el contexto completo
+4. Las instrucciones dinámicas son clave para mantener coherencia
+
+Autor: Andres Montero
+Fecha: Marzo 2024
+"""
+
 import asyncio
 from dataclasses import dataclass, field
 from typing import List
