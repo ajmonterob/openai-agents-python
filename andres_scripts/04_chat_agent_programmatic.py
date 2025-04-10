@@ -1,3 +1,40 @@
+"""
+Chat Agent con Control Programático del Flujo
+
+Este script implementa un chat interactivo que demuestra un enfoque programático
+para el control del flujo de la conversación, en contraste con el enfoque basado
+en handoffs del agente de triage.
+
+Características Principales:
+1. Control Programático:
+   - Detección de idioma mediante patrones y validación con LLM
+   - Selección explícita del agente basada en el idioma detectado
+   - Manejo directo del flujo de la conversación en código Python
+
+2. Optimizaciones de Rendimiento:
+   - Detección rápida de idioma basada en patrones
+   - Cache del último idioma usado para evitar detecciones innecesarias
+   - Uso selectivo del LLM para validación en casos ambiguos
+
+3. Gestión de Contexto:
+   - Mantiene historial de la conversación
+   - Instrucciones dinámicas basadas en el contexto
+   - Coherencia en las respuestas a través del tiempo
+
+4. Herramientas Integradas:
+   - Consulta del clima (get_weather)
+   - Calculadora (calculate)
+
+Diferencias clave con versiones anteriores:
+- Elimina la necesidad de un agente de triage
+- Mayor control sobre el flujo de ejecución
+- Mejor rendimiento en la detección de idioma
+- Manejo más explícito del estado de la conversación
+
+Autor: Andres Montero
+Fecha: Marzo 2024
+"""
+
 import asyncio
 import re
 from dataclasses import dataclass, field
@@ -7,12 +44,24 @@ from agents import Agent, Runner, function_tool, RunConfig, RunContextWrapper
 
 @dataclass
 class ChatMemoryContext:
+    """
+    Clase para mantener el contexto y historial de la conversación.
+    
+    Attributes:
+        history (List[str]): Lista de mensajes en el formato "rol: contenido"
+    
+    Methods:
+        add_message: Agrega un nuevo mensaje al historial
+        get_history: Obtiene todo el historial como una cadena formateada
+    """
     history: List[str] = field(default_factory=list)
     
     def add_message(self, role: str, content: str):
+        """Agrega un mensaje al historial con su rol correspondiente"""
         self.history.append(f"{role}: {content}")
     
     def get_history(self) -> str:
+        """Retorna el historial completo como una cadena formateada"""
         return "\n".join(self.history)
 
 class Weather(BaseModel):
@@ -111,7 +160,20 @@ def create_english_agent() -> Agent[ChatMemoryContext]:
     )
 
 def detect_language(text: str) -> str:
-    """Detección rápida del idioma basada en patrones simples"""
+    """
+    Realiza una detección rápida del idioma basada en patrones léxicos y caracteres específicos.
+    
+    Esta función implementa un enfoque eficiente de detección que:
+    1. Busca caracteres específicos del español (ñ, tildes, ¿, ¡)
+    2. Identifica palabras comunes en cada idioma
+    3. Realiza un conteo ponderado para determinar el idioma predominante
+    
+    Args:
+        text (str): El texto a analizar
+        
+    Returns:
+        str: "spanish" o "english" según el idioma detectado
+    """
     # Palabras y caracteres específicos del español
     spanish_patterns = ['ñ', 'á', 'é', 'í', 'ó', 'ú', 'ü', '¿', '¡', 
                         'como', 'qué', 'cómo', 'hola', 'buenos', 'gracias', 
@@ -134,6 +196,28 @@ def detect_language(text: str) -> str:
         return "english"
 
 async def chat():
+    """
+    Función principal que implementa el flujo de chat interactivo.
+    
+    El flujo de ejecución sigue estos pasos:
+    1. Inicialización:
+       - Crea el contexto compartido para el historial
+       - Inicializa los agentes especializados
+       - Configura el Runner con las opciones necesarias
+       
+    2. Bucle Principal:
+       - Recibe input del usuario
+       - Detecta el idioma mediante un proceso de dos etapas:
+         a) Detección rápida basada en patrones
+         b) Validación opcional con LLM para casos ambiguos
+       - Selecciona y ejecuta el agente apropiado
+       - Mantiene el historial actualizado
+       
+    3. Optimizaciones:
+       - Cache del último idioma usado
+       - Validación selectiva con LLM
+       - Manejo de errores robusto
+    """
     # Crear el contexto compartido
     context = ChatMemoryContext()
     
