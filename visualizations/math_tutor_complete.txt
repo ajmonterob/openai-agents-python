@@ -1,0 +1,36 @@
+
+    === Math Tutor System Architecture ===
+    
+    +----------+     mensaje     +---------------+
+    | Usuario  +---------------->| Orquestador   |
+    +----------+                 +-------+-------+
+        ^                                |
+        |                                | handoff
+        |                                ▼
+        |                        +---------------+
+        |                        | Diagnóstico   |
+        |                        +-------+-------+
+        |                                |
+        |  explicación                   | transferencia
+        +--------------------------------+
+    
+    === Componentes del Sistema ===
+    
+    +---------------+      +-----------------+      +----------------+
+    | ChatMemory    |<---->| Orquestador     |<---->| Diagnóstico    |
+    | Context       |      | - Explica       |      | - Hace         |
+    | - Historial   |      |   conceptos     |      |   preguntas    |
+    | - Tema        |      | - Retoma control|      | - Transfiere   |
+    | - Nivel       |      +-----------------+      +----------------+
+    +-------+-------+
+            |
+            ▼
+    +---------------+
+    | Tracing       |
+    | - Spans       |
+    | - Grupos      |
+    | - Metadatos   |
+    +---------------+
+    
+    === End of System Architecture ===
+    

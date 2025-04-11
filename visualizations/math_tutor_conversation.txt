@@ -1,0 +1,32 @@
+
+    === Flujo de Conversación del Tutor de Matemáticas ===
+    
+    Usuario: "Hola, necesito ayuda con multiplicación"
+                          |
+                          ▼
+    Diagnóstico: "¿En qué tema ocupas ayuda hoy?"
+                          |
+                          ▼
+    Usuario: "Multiplicación"
+                          |
+                          ▼
+    Diagnóstico: "¿Qué sabes sobre el tema?"
+                          |
+                          ▼
+    Usuario: "Solo sé las tablas"
+                          |
+                          ▼
+    Diagnóstico: "He completado el diagnóstico inicial. 
+                  Ahora mi colega te ayudará."
+                          |
+                          ▼
+    Orquestador: [Explicación detallada de multiplicación]
+                          |
+                          ▼
+    Usuario: "¿Podrías darme un ejemplo?"
+                          |
+                          ▼
+    Orquestador: [Ejemplo de multiplicación]
+    
+    === End of Conversation Flow ===
+    
