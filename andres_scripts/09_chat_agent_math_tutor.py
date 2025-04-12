@@ -304,20 +304,30 @@ async def analyze_conversation(context: ChatMemoryContext, result: str) -> None:
             elif context.current_flow_state == "calibration":
                 context.advance_flow()  # calibration -> final
 
+# Función auxiliar para mostrar mensajes de agente con formato correcto
+def display_agent_message(agent_name: str, message: str, hide_agent_name=True):
+    """Muestra un mensaje del agente con el formato correcto.
+    
+    Args:
+        agent_name: Nombre del agente que envía el mensaje
+        message: Contenido del mensaje
+        hide_agent_name: Si es True, no mostrará el nombre del agente al usuario
+    """
+    if hide_agent_name:
+        print(f"\nAsistente: {message}")
+        debug_print(f"[DEBUG] Mostrando mensaje de {agent_name} (oculto para usuario)")
+    else:
+        print(f"\nAsistente [{agent_name}]: {message}")
+        debug_print(f"[DEBUG] Mostrando mensaje de {agent_name}")
+
 # Función para procesar la respuesta antes de mostrarla al usuario
 def process_response_for_display(response: str) -> str:
     """Procesa la respuesta para que sea amigable para el usuario."""
-    # Reemplazar el mensaje de transferencia con algo más natural
+    # Reemplazar el mensaje de transferencia con mensaje vacío (no se mostrará)
     if "[TRANSFERENCIA_CONTROL]" in response:
-        return "He completado mi parte. Ahora pasaré el control a mi colega."
+        return ""  # Mensaje vacío, no se mostrará al usuario
     
     return response
-
-# Función auxiliar para mostrar mensajes de agente con formato correcto
-def display_agent_message(agent_name: str, message: str):
-    """Muestra un mensaje del agente con el formato correcto."""
-    print(f"\nAsistente [{agent_name}]: {message}")
-    debug_print(f"[DEBUG] Mostrando mensaje de {agent_name}")
 
 async def chat():
     print("¡Bienvenido al Tutor de Matemáticas!")
@@ -361,7 +371,11 @@ async def chat():
         # Procesar y mostrar el primer mensaje
         response_text = process_response_for_display(result.final_output)
         context.add_message("Asistente", result.final_output)
-        display_agent_message("Diagnóstico", response_text)
+        
+        # Solo mostrar si hay un mensaje válido (no transferencia)
+        if response_text:
+            display_agent_message("Diagnóstico", response_text)
+        
         context.current_flow_state = "diagnostic"
         
         # Bucle principal de chat
@@ -472,14 +486,14 @@ async def chat():
                         context.current_flow_state = "calibration"
                         debug_print("[DEBUG] Avanzando flujo a: calibration")
                         
-                        # Agregar mensaje de despedida del diagnóstico
+                        # Agregar mensaje de transferencia al historial, pero no mostrar al usuario
                         if "[TRANSFERENCIA_CONTROL]" not in response_text:
-                            display_text = "He completado mi diagnóstico. Ahora mi colega te presentará algunas expresiones matemáticas."
+                            transfer_message = "He completado mi diagnóstico. Ahora pasaré el control a mi colega."
                         else:
-                            display_text = process_response_for_display(response_text)
+                            transfer_message = process_response_for_display(response_text)
                         
-                        context.add_message("Asistente", display_text)
-                        display_agent_message("Diagnóstico", display_text)
+                        # Solo agregar al historial, no mostrar
+                        context.add_message("Asistente", transfer_message)
                         
                         # Ejecutar turno extra del calibrador inmediatamente
                         extra_input = "Necesito expresiones matemáticas para evaluar"
@@ -494,6 +508,8 @@ async def chat():
                         extra_response = extra_result.final_output
                         debug_print(f"[DEBUG] Respuesta del calibrador: {extra_response}")
                         context.add_message("Asistente", extra_response)
+                        
+                        # Mostrar directamente la respuesta del calibrador, sin indicar cambio de agente
                         display_agent_message("Calibrador", extra_response)
                         
                         # Analizar para extraer expresiones
@@ -509,10 +525,8 @@ async def chat():
                         context.current_flow_state = "calibration"
                         debug_print("[DEBUG] Avanzando flujo a: calibration")
                         
-                        # Procesar mensaje de transferencia
-                        display_text = process_response_for_display(response_text)
-                        context.add_message("Asistente", display_text)
-                        display_agent_message("Diagnóstico", display_text)
+                        # No mostrar el mensaje de transferencia, solo agregar al historial
+                        context.add_message("Asistente", process_response_for_display(response_text))
                         
                         # Ejecutar turno extra del calibrador
                         extra_input = "Necesito expresiones matemáticas para evaluar"
@@ -527,6 +541,8 @@ async def chat():
                         extra_response = extra_result.final_output
                         debug_print(f"[DEBUG] Respuesta del calibrador: {extra_response}")
                         context.add_message("Asistente", extra_response)
+                        
+                        # Mostrar directamente la respuesta del calibrador
                         display_agent_message("Calibrador", extra_response)
                         
                         # Analizar para extraer expresiones
@@ -538,10 +554,8 @@ async def chat():
                         context.current_flow_state = "final"
                         debug_print("[DEBUG] Avanzando flujo a: final")
                         
-                        # Procesar mensaje de transferencia
-                        display_text = process_response_for_display(response_text)
-                        context.add_message("Asistente", display_text)
-                        display_agent_message("Calibrador", display_text)
+                        # No mostrar el mensaje de transferencia, solo agregar al historial
+                        context.add_message("Asistente", process_response_for_display(response_text))
                         
                         # Ejecutar turno extra del orquestador
                         extra_input = "Dame una explicación sobre el tema"
@@ -556,13 +570,18 @@ async def chat():
                         extra_response = extra_result.final_output
                         debug_print(f"[DEBUG] Respuesta del orquestador: {extra_response}")
                         context.add_message("Asistente", extra_response)
+                        
+                        # Mostrar directamente la respuesta del orquestador
                         display_agent_message("Orquestador", extra_response)
                         continue  # Saltar al siguiente turno de usuario
                 
                 # Si no hay transferencia, procesar normalmente
                 display_text = process_response_for_display(response_text)
-                context.add_message("Asistente", response_text)
-                display_agent_message(agent_name, display_text)
+                
+                # Solo mostrar si hay un mensaje válido (no transferencia)
+                if display_text:
+                    context.add_message("Asistente", response_text)
+                    display_agent_message(agent_name, display_text)
                 
                 # Analizar la conversación
                 await analyze_conversation(context, response_text)
