@@ -206,15 +206,17 @@ def dynamic_calibrator_instructions(ctx: RunContextWrapper[ChatMemoryContext], a
         
         Has recibido feedback sobre tus expresiones matemáticas. 
         
-        IMPORTANTE: DEBES transferir el control al agente de andamiaje inmediatamente.
+        INSTRUCCIÓN CRÍTICA: DEBES transferir el control al agente de andamiaje inmediatamente.
         NO debes proponer ningún ejercicio.
         NO debes dar ninguna explicación.
+        NO debes hacer ningún comentario.
+        NO debes generar ningún contenido adicional.
         
-        En tu próxima respuesta, DEBES escribir EXACTAMENTE:
+        Tu próxima respuesta DEBE consistir ÚNICAMENTE en el siguiente texto exacto:
         
         [TRANSFERENCIA_CONTROL]
         
-        Nada más, nada menos. Cualquier otro texto causará errores en el sistema.
+        NADA MÁS. Si agregas cualquier otro texto, causarás un error en el sistema.
         """
     else:
         return f"""Eres un agente calibrador que SOLO puede:
@@ -255,7 +257,7 @@ def dynamic_scaffolding_instructions(ctx: RunContextWrapper[ChatMemoryContext], 
     expresiones = ctx.context.math_expressions
     feedback = ctx.context.user_feedback
     
-    # Determinar qué expresiones se consideraron difíciles
+    # Determinar qué expresiones se consideraron difíciles y fáciles
     difficult_expressions = [expr for expr, level in feedback.items() if level == "difícil"]
     easy_expressions = [expr for expr, level in feedback.items() if level == "fácil"]
     
@@ -270,41 +272,71 @@ def dynamic_scaffolding_instructions(ctx: RunContextWrapper[ChatMemoryContext], 
         No agregues NADA más.
         """
     elif exercise_generated:
-        # Ya generó el ejercicio, ahora debe guiar al alumno
-        return f"""Eres un agente de andamiaje que ayuda con la enseñanza de {tema}.
+        # Ya generó el ejercicio, ahora debe guiar al alumno MOSTRANDO la solución paso a paso
+        return f"""Eres un agente de andamiaje que enseña {tema}.
 
         Has presentado el siguiente ejercicio al alumno:
         {ctx.context.scaffold_exercise}
         
-        Tu objetivo es guiar al alumno paso a paso a través de la solución. Debes:
-        1. Explicar los conceptos necesarios de manera clara y concisa
-        2. Dividir el proceso de solución en pasos simples
-        3. Verificar que el alumno está siguiendo y entendiendo
+        IMPORTANTE: TU trabajo es MOSTRAR la solución paso a paso, NO pedir al alumno que lo resuelva.
         
-        Si el alumno indica explícitamente que ha entendido con frases como "entendí", "comprendo", "tiene sentido", "ya entendí", etc.,
-        debes confirmar y prepararte para transferir el control.
+        Debes:
+        1. Explicar cómo resolver el ejercicio dividiendo la solución en pasos claros y sencillos
+        2. Mostrar cada paso de la resolución con explicaciones detalladas
+        3. Usar un lenguaje adaptado al nivel {nivel} del estudiante
+        4. Verificar la comprensión del alumno al final
+        
+        NO pidas al alumno que resuelva el problema.
+        NO esperes a que el alumno te dé una respuesta antes de continuar.
+        SÍ explica todos los pasos de la solución de manera clara y detallada.
+        
+        Si el alumno indica explícitamente que ha entendido con frases como "entendí", "comprendo", "tiene sentido", etc.,
+        debes responder confirmando y luego transferir el control.
         
         Historial de la conversación:
         {history}
         """
     else:
-        # Aún no ha generado un ejercicio, debe crearlo
-        return f"""Eres un agente de andamiaje que ayuda con la enseñanza de {tema}.
+        # Aún no ha generado un ejercicio, debe crearlo siguiendo el concepto de ZDP
+        return f"""Eres un agente de andamiaje especializado en matemáticas que utiliza el concepto de Zona de Desarrollo Próximo (ZDP).
         
-        Basado en la información recopilada:
+        PRIMERO, analiza cuidadosamente la siguiente información recolectada sobre el estudiante:
         - Tema: {tema}
-        - Nivel: {nivel}
+        - Nivel declarado: {nivel}
         - Expresiones que el alumno considera fáciles: {easy_expressions if easy_expressions else "Ninguna específica"}
         - Expresiones que el alumno considera difíciles: {difficult_expressions if difficult_expressions else "Ninguna específica"}
         
-        Tu tarea es crear UN SOLO ejercicio que:
-        1. Sea ligeramente más desafiante que lo que el alumno considera fácil
-        2. Incorpore elementos del tema {tema}
-        3. Sea claro y bien estructurado
-        4. Incluya la solución paso a paso
+        PRINCIPIOS DE ZONA DE DESARROLLO PRÓXIMO (ZDP) A APLICAR:
+        1. Identifica lo que el estudiante ya sabe hacer con facilidad (ejercicios fáciles)
+        2. Identifica lo que aún no puede hacer sin ayuda (ejercicios difíciles)
+        3. Diseña un ejercicio que esté CLARAMENTE por encima de su nivel actual, pero no tan complejo 
+           como los que encuentra muy difíciles
+        4. El ejercicio DEBE ser más desafiante que lo que ya domina - NO del mismo nivel que ya maneja
         
-        Presenta primero el ejercicio al alumno y espera su respuesta.
-        NO des la solución completa inmediatamente. Espera a que el alumno interactúe.
+        REGLAS ESPECÍFICAS PARA LA GENERACIÓN DEL EJERCICIO:
+        1. Identifica claramente la diferencia entre lo que considera fácil y difícil
+        2. Crea un ejercicio que introduzca UN NUEVO CONCEPTO o complejidad que no esté presente en los ejercicios fáciles
+        3. Aplica estas pautas específicas dependiendo del feedback:
+           - Si las ecuaciones lineales simples son fáciles, usa lineales más complejas con paréntesis o coeficientes fraccionales
+           - Si las ecuaciones cuadráticas son difíciles, no las incluyas aún, pero puedes acercarte con ejercicios que incluyan multiplicación de paréntesis
+           - Si las fracciones son difíciles, introduce una fracción simple en un contexto que ya domina
+           - Si los ejercicios fáciles tienen un solo paso, diseña uno con 3-4 pasos claros
+        4. NUNCA generes un ejercicio que sea esencialmente igual a los que ya domina con solo números diferentes
+        5. El ejercicio DEBE representar un claro paso adelante en complejidad y aprendizaje
+        
+        EJEMPLOS DE PROGRESIÓN ADECUADA:
+        - Si domina: 2x + 3 = 7 → Siguiente nivel: 2(x + 3) - 4 = 10
+        - Si domina: 5x - 2 = 3x + 4 → Siguiente nivel: 3x/2 - 4 = x + 2
+        - Si domina: Ecuaciones de un paso → Siguiente nivel: Ecuaciones con variables en ambos lados y paréntesis
+        
+        ESTRUCTURA DE TU RESPUESTA:
+        - "Aquí tienes un ejercicio de [tema] diseñado para avanzar tu nivel actual:"
+        - [Presenta el ejercicio más avanzado]
+        - "Vamos a resolverlo paso a paso:"
+        - [Paso 1 con explicación detallada]
+        - [Paso 2 con explicación detallada]
+        - [Continuar con los pasos necesarios]
+        - "¿Has entendido la explicación?"
         
         Historial de la conversación:
         {history}
@@ -333,6 +365,8 @@ def create_calibrator_agent() -> Agent[ChatMemoryContext]:
 
 def create_scaffolding_agent() -> Agent[ChatMemoryContext]:
     """Crea el agente de andamiaje."""
+    debug_print("Creando agente de andamiaje")
+    
     return Agent[ChatMemoryContext](
         name="ScaffoldingAgent",
         model="gpt-4-turbo-preview",
@@ -711,28 +745,24 @@ async def chat():
                 if has_feedback or len(context.user_feedback) > 0:
                     debug_print(f"[DEBUG] Feedback detectado: {context.user_feedback}, forzando transferencia al andamiaje")
                     
-                    # Ejecutar el calibrador para generar una respuesta de transferencia
-                    extra_result = await Runner.run(
-                        calibrator,
-                        input="He recibido feedback sobre las expresiones. Por favor, responde exactamente con [TRANSFERENCIA_CONTROL]",
-                        context=context,
-                        run_config=run_config
-                    )
+                    # Agregar mensaje del usuario al contexto
+                    # Ejecutar el calibrador para generar una respuesta de transferencia (que no se mostrará al usuario)
+                    with custom_span("execute_calibrator_transfer", data={"agent": "calibrator", "action": "transfer"}):
+                        cal_response = f"Gracias por tu feedback. Veo que las expresiones {', '.join([str(i+1) for i, expr in enumerate(context.math_expressions) if context.user_feedback.get(expr) == 'fácil'])} te resultan fáciles, mientras que las expresiones {', '.join([str(i+1) for i, expr in enumerate(context.math_expressions) if context.user_feedback.get(expr) == 'difícil'])} te parecen difíciles. [TRANSFERENCIA_CONTROL]"
                     
-                    response_text = extra_result.final_output
-                    debug_print(f"[DEBUG] Respuesta del calibrador para transferencia: {response_text}")
+                    # Cambiar a la fase de andamiaje
+                    context.current_flow_state = "scaffolding"
+                    debug_print("[DEBUG] Avanzando flujo a: scaffolding")
                     
-                    # Debe contener [TRANSFERENCIA_CONTROL] debido a las instrucciones
-                    if "[TRANSFERENCIA_CONTROL]" in response_text:
-                        # Cambiar a la fase de andamiaje
-                        context.current_flow_state = "scaffolding"
-                        debug_print("[DEBUG] Avanzando flujo a: scaffolding")
+                    # Agregar al historial pero no mostrar el mensaje de transferencia
+                    context.add_message("Asistente", process_response_for_display(cal_response))
+                    
+                    # Ejecutar turno extra del andamiaje
+                    extra_input = "Necesito generar un ejercicio apropiado y comenzar a explicarlo paso a paso inmediatamente, sin esperar respuesta del alumno"
+                    with custom_span("execute_scaffolding_first", data={"agent": "scaffolding", "action": "first_interaction"}):
+                        debug_print("[DEBUG] Ejecutando agente de andamiaje con instrucción: " + extra_input)
                         
-                        # Agregar al historial pero no mostrar el mensaje de transferencia
-                        context.add_message("Asistente", process_response_for_display(response_text))
-                        
-                        # Ejecutar turno extra del andamiaje
-                        extra_input = "Necesito generar un ejercicio apropiado"
+                        # Ejecutar el agente de andamiaje para generar el ejercicio
                         extra_scaffold_result = await Runner.run(
                             scaffolding,
                             input=extra_input,
@@ -742,7 +772,7 @@ async def chat():
                         
                         # Procesar y mostrar respuesta del andamiaje
                         extra_scaffold_response = extra_scaffold_result.final_output
-                        debug_print(f"[DEBUG] Respuesta del andamiaje: {extra_scaffold_response}")
+                        debug_print(f"[DEBUG] Respuesta del andamiaje: {extra_scaffold_response[:100]}...")
                         context.add_message("Asistente", extra_scaffold_response)
                         display_agent_message("Andamiaje", extra_scaffold_response)
                         continue  # Saltar al siguiente turno de usuario
@@ -802,10 +832,10 @@ async def chat():
                         context.add_message("Asistente", transfer_message)
                         
                         # Ejecutar turno extra del calibrador inmediatamente
-                        extra_input = "Necesito expresiones matemáticas para evaluar"
+                        extra_input = "Necesito generar un ejercicio apropiado y comenzar a explicarlo paso a paso inmediatamente, sin esperar respuesta del alumno"
                         extra_result = await Runner.run(
                             calibrator,
-                            input=extra_input,
+                            input="Necesito expresiones matemáticas para evaluar",
                             context=context,
                             run_config=run_config
                         )
@@ -835,10 +865,10 @@ async def chat():
                         context.add_message("Asistente", process_response_for_display(response_text))
                         
                         # Ejecutar turno extra del calibrador
-                        extra_input = "Necesito expresiones matemáticas para evaluar"
+                        extra_input = "Necesito generar un ejercicio apropiado y comenzar a explicarlo paso a paso inmediatamente, sin esperar respuesta del alumno"
                         extra_result = await Runner.run(
                             calibrator,
-                            input=extra_input,
+                            input="Necesito expresiones matemáticas para evaluar",
                             context=context,
                             run_config=run_config
                         )
@@ -864,7 +894,7 @@ async def chat():
                         context.add_message("Asistente", process_response_for_display(response_text))
                         
                         # Ejecutar turno extra del andamiaje
-                        extra_input = "Necesito generar un ejercicio apropiado"
+                        extra_input = "Necesito generar un ejercicio apropiado y comenzar a explicarlo paso a paso inmediatamente, sin esperar respuesta del alumno"
                         extra_result = await Runner.run(
                             scaffolding,
                             input=extra_input,
@@ -881,7 +911,7 @@ async def chat():
                         display_agent_message("Andamiaje", extra_response)
                         
                         # Analizar para extraer expresiones
-                        await analyze_conversation(context, agent_name, extra_response, context.current_flow_state, context.scaffold_exercise != "", context.scaffold_understood)
+                        await analyze_conversation(context, "Andamiaje", extra_response, context.current_flow_state, context.scaffold_exercise != "", context.scaffold_understood)
                         continue  # Saltar al siguiente turno de usuario
                     
                     elif context.current_flow_state == "scaffolding":
