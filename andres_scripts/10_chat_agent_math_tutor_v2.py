@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Tuple
 from agents import Agent, Runner, function_tool, RunConfig, HandoffInputData, RunContextWrapper
 from agents.tracing import trace, custom_span
+import re
 
 # Configuración de debug
 DEBUG = True
@@ -44,6 +45,8 @@ class ChatMemoryContext:
     scaffold_solution: str = ""
     scaffold_understood: bool = False
     current_flow_state: str = "initial"  # initial -> diagnostic -> calibration -> scaffolding -> final
+    current_step: int = 1  # Seguimiento del paso actual en la explicación
+    total_steps: int = 0  # Número total de pasos en la explicación
     
     def add_message(self, role: str, content: str):
         self.history.append(f"{role}: {content}")
@@ -89,6 +92,27 @@ class ChatMemoryContext:
         self.scaffold_solution = solution
         debug_print(f"Ejercicio de andamiaje establecido: {exercise}")
         debug_print(f"Solución de andamiaje establecida: {solution}")
+        
+    def set_total_steps(self, steps: int):
+        """Establece el número total de pasos para la explicación."""
+        self.total_steps = steps
+        debug_print(f"Total de pasos establecido: {steps}")
+        
+    def next_step(self):
+        """Avanza al siguiente paso en la explicación."""
+        if self.current_step < self.total_steps:
+            self.current_step += 1
+            debug_print(f"Avanzando al paso {self.current_step} de {self.total_steps}")
+            return True
+        else:
+            debug_print("Ya se completaron todos los pasos")
+            self.scaffold_understood = True
+            return False
+            
+    def reset_current_step(self):
+        """Reinicia el contador de pasos."""
+        self.current_step = 1
+        debug_print("Contador de pasos reiniciado a 1")
 
 # Función dinámica para instrucciones del orquestador
 def dynamic_orchestrator_instructions(ctx: RunContextWrapper[ChatMemoryContext], agent: Agent) -> str:
@@ -134,19 +158,14 @@ def dynamic_orchestrator_instructions(ctx: RunContextWrapper[ChatMemoryContext],
     elif flow_state == "final":
         return f"""Eres el orquestador principal del tutor de matemáticas.
         
-        Has recibido el control después de que el agente de andamiaje completó su explicación.
-        Tu trabajo es simplemente concluir la sesión con un mensaje breve y positivo.
+        INSTRUCCIÓN CRÍTICA: Has recibido el control del agente de andamiaje después de completar todos los pasos del ejercicio.
         
-        IMPORTANTE: NO debes proporcionar explicaciones adicionales sobre el tema.
-        NO debes enseñar conceptos nuevos.
-        NO debes introducir ejercicios adicionales.
+        Tu ÚNICA tarea es concluir la sesión de manera breve y positiva. NO debes dar ninguna explicación adicional sobre el tema.
         
-        Debes simplemente:
-        1. Felicitar al estudiante por su progreso
-        2. Preguntar si tiene alguna duda adicional
-        3. Ofrecer continuar en otra sesión si lo necesita
+        Tu respuesta debe ser ÚNICAMENTE una conclusión breve como:
+        "¡Excelente! Has completado con éxito este ejercicio sobre {ctx.context.topic if ctx.context.topic else "matemáticas"}. Espero que hayas comprendido mejor el tema. ¿Hay algo más en lo que pueda ayudarte?"
         
-        Mantén tu respuesta breve y concisa.
+        NO debes proporcionar explicaciones sobre ecuaciones, tipos de ecuaciones, métodos de resolución o cualquier otro contenido educativo.
         """
     else:
         return f"""Eres el orquestador principal del tutor de matemáticas.
@@ -278,41 +297,112 @@ def dynamic_scaffolding_instructions(ctx: RunContextWrapper[ChatMemoryContext], 
     difficult_expressions = [expr for expr, level in feedback.items() if level == "difícil"]
     easy_expressions = [expr for expr, level in feedback.items() if level == "fácil"]
     
+    # Verificar el paso actual y total
+    current_step = ctx.context.current_step
+    total_steps = ctx.context.total_steps if ctx.context.total_steps > 0 else 4
+    
+    # Obtener el último mensaje del usuario
+    last_user_message = ""
+    for line in reversed(ctx.context.history):
+        if line.startswith("Usuario:"):
+            last_user_message = line.split("Usuario:")[1].strip()
+            break
+    
+    # Verificar si el usuario entendió el paso anterior
+    user_understood = check_understanding(last_user_message) if last_user_message else False
+    
     if understanding_confirmed:
-        # Si el alumno ya entendió, transferir el control
+        # Si el alumno ya entendió todos los pasos, transferir el control
         return """Eres un agente de andamiaje.
         
-        El alumno ha confirmado que entiende el ejercicio. Ahora DEBES responder EXACTAMENTE con el siguiente mensaje:
+        El alumno ha confirmado que entiende el ejercicio completo. Ahora DEBES responder EXACTAMENTE con el siguiente mensaje:
         
         [TRANSFERENCIA_CONTROL]
         
         No agregues NADA más.
         """
     elif exercise_generated:
-        # Ya generó el ejercicio, ahora debe guiar al alumno MOSTRANDO la solución paso a paso
-        return f"""Eres un agente de andamiaje que enseña {tema}.
+        # Ya generó el ejercicio, ahora debe guiar al alumno paso a paso
+        if user_understood and current_step < total_steps:
+            # El usuario entendió el paso anterior, mostrar el siguiente paso
+            return f"""Eres un agente de andamiaje que enseña {tema}.
 
-        Has presentado el siguiente ejercicio al alumno:
-        {ctx.context.scaffold_exercise}
-        
-        IMPORTANTE: TU trabajo es MOSTRAR la solución paso a paso, NO pedir al alumno que lo resuelva.
-        
-        Debes:
-        1. Explicar cómo resolver el ejercicio dividiendo la solución en pasos claros y sencillos
-        2. Mostrar cada paso de la resolución con explicaciones detalladas
-        3. Usar un lenguaje adaptado al nivel {nivel} del estudiante
-        4. Verificar la comprensión del alumno al final
-        
-        NO pidas al alumno que resuelva el problema.
-        NO esperes a que el alumno te dé una respuesta antes de continuar.
-        SÍ explica todos los pasos de la solución de manera clara y detallada.
-        
-        Si el alumno indica explícitamente que ha entendido con frases como "entendí", "comprendo", "tiene sentido", etc.,
-        debes responder confirmando y luego transferir el control.
-        
-        Historial de la conversación:
-        {history}
-        """
+            Has presentado el siguiente ejercicio al alumno:
+            {ctx.context.scaffold_exercise}
+            
+            INSTRUCCIONES CRÍTICAS - EXTREMADAMENTE IMPORTANTE:
+            1. El alumno ha confirmado que entiende el paso {current_step} de {total_steps}.
+            2. DEBES presentar ÚNICAMENTE el paso {current_step+1} ahora.
+            3. NO DEBES presentar ningún otro paso aparte del paso {current_step+1}.
+            4. NO DEBES mostrar todos los pasos a la vez.
+            5. DEBES comenzar tu respuesta con "**Paso {current_step+1}:**"
+            
+            PROHIBIDO:
+            - NO muestres los pasos {', '.join([str(i) for i in range(1, total_steps+1) if i != current_step+1])}.
+            - NO des una explicación completa de todo el ejercicio.
+            - NO resumas lo que ya has explicado.
+            
+            FORMATO OBLIGATORIO:
+            "**Paso {current_step+1}:** [título del paso]
+            
+            [Explicación detallada ÚNICAMENTE del paso {current_step+1}]
+            
+            ¿Has entendido este paso?"
+            
+            Historial de la conversación:
+            {history}
+            """
+        elif current_step == total_steps and user_understood:
+            # El usuario entendió el último paso, dar conclusión y transferir
+            return f"""Eres un agente de andamiaje que enseña {tema}.
+
+            Has presentado el siguiente ejercicio al alumno:
+            {ctx.context.scaffold_exercise}
+            
+            INSTRUCCIONES CRÍTICAS:
+            1. El alumno ha entendido el último paso ({current_step} de {total_steps}).
+            2. DEBES proporcionar una conclusión breve del ejercicio.
+            3. DEBES terminar con la frase "[TRANSFERENCIA_CONTROL]" para pasar al siguiente agente.
+            
+            FORMATO OBLIGATORIO:
+            "**Conclusión:**
+            
+            [Breve resumen de lo aprendido en este ejercicio]
+            
+            [TRANSFERENCIA_CONTROL]"
+            
+            Historial de la conversación:
+            {history}
+            """
+        else:
+            # Mostrar el paso actual
+            return f"""Eres un agente de andamiaje que enseña {tema}.
+
+            Has presentado el siguiente ejercicio al alumno:
+            {ctx.context.scaffold_exercise}
+            
+            INSTRUCCIONES CRÍTICAS - EXTREMADAMENTE IMPORTANTE:
+            1. DEBES presentar ÚNICAMENTE el paso {current_step} de {total_steps}.
+            2. NO DEBES presentar ningún otro paso aparte del paso {current_step}.
+            3. NO DEBES mostrar todos los pasos a la vez.
+            4. DEBES comenzar tu respuesta con "**Paso {current_step}:**"
+            5. DEBES terminar preguntando al alumno si ha entendido.
+            
+            PROHIBIDO:
+            - NO muestres los pasos {', '.join([str(i) for i in range(1, total_steps+1) if i != current_step])}.
+            - NO des una explicación completa de todo el ejercicio.
+            - NO adelantes información de pasos futuros.
+            
+            FORMATO OBLIGATORIO:
+            "**Paso {current_step}:** [título del paso]
+            
+            [Explicación detallada ÚNICAMENTE del paso {current_step}]
+            
+            ¿Has entendido este paso?"
+            
+            Historial de la conversación:
+            {history}
+            """
     else:
         # Aún no ha generado un ejercicio, debe crearlo siguiendo el concepto de ZDP
         return f"""Eres un agente de andamiaje especializado en matemáticas que utiliza el concepto de Zona de Desarrollo Próximo (ZDP).
@@ -341,19 +431,26 @@ def dynamic_scaffolding_instructions(ctx: RunContextWrapper[ChatMemoryContext], 
         4. NUNCA generes un ejercicio que sea esencialmente igual a los que ya domina con solo números diferentes
         5. El ejercicio DEBE representar un claro paso adelante en complejidad y aprendizaje
         
-        EJEMPLOS DE PROGRESIÓN ADECUADA:
-        - Si domina: 2x + 3 = 7 → Siguiente nivel: 2(x + 3) - 4 = 10
-        - Si domina: 5x - 2 = 3x + 4 → Siguiente nivel: 3x/2 - 4 = x + 2
-        - Si domina: Ecuaciones de un paso → Siguiente nivel: Ecuaciones con variables en ambos lados y paréntesis
+        INSTRUCCIONES CRÍTICAS - EXTREMADAMENTE IMPORTANTE:
+        1. Divide la solución en EXACTAMENTE 4 PASOS.
+        2. SÓLO MUESTRA EL PRIMER PASO ahora.
+        3. NO muestres los pasos 2, 3, 4 ni la solución completa ahora.
+        4. Debes presentar los demás pasos SÓLO cuando el alumno confirme que ha entendido cada paso individual.
         
         ESTRUCTURA DE TU RESPUESTA:
-        - "Aquí tienes un ejercicio de [tema] diseñado para avanzar tu nivel actual:"
-        - [Presenta el ejercicio más avanzado]
-        - "Vamos a resolverlo paso a paso:"
-        - [Paso 1 con explicación detallada]
-        - [Paso 2 con explicación detallada]
-        - [Continuar con los pasos necesarios]
-        - "¿Has entendido la explicación?"
+        ```
+        Aquí tienes un ejercicio de [tema] diseñado para avanzar tu nivel actual:
+        
+        **Ejercicio:** [Presenta el ejercicio más avanzado]
+        
+        Vamos a resolverlo paso a paso:
+        
+        **Paso 1:** [Título del primer paso]
+        
+        [Explicación detallada SOLO del primer paso]
+        
+        ¿Has entendido este primer paso? Si tienes dudas, por favor dímelo para explicarlo de otra manera.
+        ```
         
         Historial de la conversación:
         {history}
@@ -508,6 +605,76 @@ async def analyze_conversation(context: ChatMemoryContext, agent_name: str, resp
             debug_print(f"[FLUJO] ⚠️ Forzando transferencia manual: calibration -> scaffolding")
             context.advance_flow()  # calibration -> scaffolding
     
+    # Extraer información de los pasos en la explicación
+    if context.current_flow_state == "scaffolding":
+        # Verificar si se menciona el número total de pasos en la respuesta
+        if "Paso 1" in response_content and context.total_steps == 0:
+            # Estimar número total de pasos
+            if "Paso 1 de " in response_content:
+                # Si menciona explícitamente "Paso 1 de X"
+                try:
+                    total_steps_match = response_content.split("Paso 1 de ")[1].split()[0]
+                    context.set_total_steps(int(total_steps_match))
+                except:
+                    # Si no se puede extraer, asumir un número por defecto
+                    context.set_total_steps(4)
+            else:
+                # Contar las menciones de "Paso" o estimar un número razonable
+                steps_estimate = 4  # Valor por defecto
+                context.set_total_steps(steps_estimate)
+                debug_print(f"[SCAFFOLDING] Estimando número total de pasos: {steps_estimate}")
+        
+        # Verificar si la respuesta actual muestra un paso específico
+        current_step_shown = None
+        step_format_patterns = [f"**Paso {i}:" for i in range(1, 10)]
+        step_format_patterns.extend([f"Paso {i}:" for i in range(1, 10)])
+        
+        for i, pattern in enumerate(step_format_patterns, 1):
+            if pattern in response_content:
+                step_number = (i-1) % 10 + 1
+                debug_print(f"[SCAFFOLDING] Detectado paso {step_number} en la respuesta")
+                current_step_shown = step_number
+                break
+        
+        # Detectar el paso actual
+        last_user_message = ""
+        for line in reversed(context.history):
+            if line.startswith("Usuario:"):
+                last_user_message = line.split("Usuario:")[1].strip()
+                break
+        
+        # Si el usuario respondió al paso actual, verificar si entendió
+        if last_user_message and agent_name == "Andamiaje":
+            user_understood = check_understanding(last_user_message)
+            debug_print(f"[SCAFFOLDING] Verificando entendimiento: {user_understood}, paso actual: {context.current_step}, total: {context.total_steps}")
+            
+            # Solo avanzar el paso si:
+            # 1. El usuario entendió (indicó que sí entendió)
+            # 2. Y la respuesta actual del agente muestra realmente el siguiente paso 
+            # (es decir, muestra el paso que corresponde al current_step actual)
+            if user_understood:
+                # Si entendió, verificar si se muestra el paso esperado
+                if current_step_shown is not None and current_step_shown == context.current_step:
+                    # El agente está mostrando el paso correcto
+                    debug_print(f"[SCAFFOLDING] Usuario entendió y se muestra el paso {context.current_step} correctamente")
+                    if context.current_step < context.total_steps:
+                        context.next_step()
+                        debug_print(f"[SCAFFOLDING] Avanzando al paso {context.current_step}")
+                    else:
+                        # Si era el último paso, marcar como entendido el ejercicio completo
+                        debug_print("[SCAFFOLDING] Usuario completó todos los pasos")
+                        context.scaffold_understood = True
+                else:
+                    # No se muestra el paso esperado, no avanzar
+                    debug_print(f"[SCAFFOLDING] Usuario entendió pero no se muestra el paso {context.current_step} (se muestra: {current_step_shown})")
+                    # Corregir el paso si es necesario
+                    if current_step_shown is not None and current_step_shown != context.current_step:
+                        debug_print(f"[SCAFFOLDING] Corrigiendo paso actual a {current_step_shown}")
+                        context.current_step = current_step_shown
+            else:
+                # Si no entendió, repetir la explicación del paso actual
+                debug_print(f"[SCAFFOLDING] Usuario NO entendió el paso {context.current_step}, se repetirá")
+    
     return new_flow_state, exercise_generated, student_confirmed_understanding, None, None
 
 # Función auxiliar para mostrar mensajes de agente con formato correcto
@@ -551,15 +718,30 @@ def check_understanding(message: str) -> bool:
     understanding_phrases = [
         "entendí", "comprendo", "entiendo", "tiene sentido", "ya entendí", 
         "lo tengo", "quedó claro", "ahora sí", "me quedó claro", "comprendo",
-        "lo he entendido", "ya lo entendí", "ya comprendí", "claro", "entendido"
+        "lo he entendido", "ya lo entendí", "ya comprendí", "claro", "entendido",
+        "sí", "si", "siguiente", "siguiente paso", "ok", "continúa", "continua",
+        "de acuerdo", "estoy listo", "adelante", "correcto", "entendi",
+        "comprendi", "claro que si", "claro que sí", "por supuesto"
     ]
     
     message_lower = message.lower()
     for phrase in understanding_phrases:
         if phrase in message_lower:
-            debug_print(f"Detectada frase de entendimiento: '{phrase}'")
+            debug_print(f"[DEBUG-UNDERSTANDING] Detectada frase de entendimiento: '{phrase}' en '{message_lower}'")
             return True
     
+    # Si solo dice "sí" o palabras afirmativas breves
+    if re.match(r"^\s*(s[ií]|yes|ok|vale)\s*$", message_lower):
+        debug_print(f"[DEBUG-UNDERSTANDING] Respuesta afirmativa breve detectada: '{message_lower}'")
+        return True
+        
+    # Si la respuesta es muy corta y no contiene negaciones
+    negations = ["no", "not", "don't", "didn't", "cannot", "can't", "nope"]
+    if len(message_lower.split()) <= 3 and not any(neg in message_lower for neg in negations):
+        debug_print(f"[DEBUG-UNDERSTANDING] Respuesta corta sin negaciones: '{message_lower}'")
+        return True
+    
+    debug_print(f"[DEBUG-UNDERSTANDING] No se detectó entendimiento en: '{message_lower}'")
     return False
 
 def handle_agent_chain(user_input, flow_state, exercise_generated, student_confirmed_understanding):
@@ -697,8 +879,20 @@ async def chat():
             
             # Verificar entendimiento si estamos en fase de andamiaje
             if context.current_flow_state == "scaffolding" and check_understanding(user_input):
-                context.scaffold_understood = True
-                debug_print("[DEBUG] Usuario ha confirmado entendimiento del ejercicio")
+                debug_print("[DEBUG] Usuario ha indicado entendimiento del paso actual")
+                
+                # Si estamos en el último paso y el usuario indica entendimiento
+                if context.current_step >= context.total_steps:
+                    context.scaffold_understood = True
+                    debug_print("[DEBUG] Usuario ha confirmado entendimiento del ejercicio completo")
+                else:
+                    # Si aún hay más pasos por mostrar, avanzar al siguiente
+                    old_step = context.current_step
+                    context.next_step()
+                    debug_print(f"[DEBUG] Avanzando al paso {context.current_step} de {context.total_steps}")
+                    
+                    # Modificar el input del usuario para que el agente muestre el siguiente paso
+                    user_input = f"He entendido el paso {old_step}. Por favor muéstrame el paso {context.current_step}."
             
             # Analizar el input para el calibrador
             if context.current_flow_state == "calibration" and context.math_expressions and not context.user_feedback:
@@ -849,10 +1043,10 @@ async def chat():
                         context.add_message("Asistente", transfer_message)
                         
                         # Ejecutar turno extra del calibrador inmediatamente
-                        extra_input = "Necesito generar un ejercicio apropiado y comenzar a explicarlo paso a paso inmediatamente, sin esperar respuesta del alumno"
+                        extra_input = "Necesito expresiones matemáticas para evaluar"
                         extra_result = await Runner.run(
                             calibrator,
-                            input="Necesito expresiones matemáticas para evaluar",
+                            input=extra_input,
                             context=context,
                             run_config=run_config
                         )
@@ -882,10 +1076,10 @@ async def chat():
                         context.add_message("Asistente", process_response_for_display(response_text))
                         
                         # Ejecutar turno extra del calibrador
-                        extra_input = "Necesito generar un ejercicio apropiado y comenzar a explicarlo paso a paso inmediatamente, sin esperar respuesta del alumno"
+                        extra_input = "Necesito expresiones matemáticas para evaluar"
                         extra_result = await Runner.run(
                             calibrator,
-                            input="Necesito expresiones matemáticas para evaluar",
+                            input=extra_input,
                             context=context,
                             run_config=run_config
                         )
@@ -933,14 +1127,14 @@ async def chat():
                     
                     elif context.current_flow_state == "scaffolding":
                         # Cambiar al orquestador final
-                        context.current_flow_state = "final"
+                        context.current_flow_state = "final"  # Este estado debe coincidir con el de las instrucciones dinámicas
                         debug_print("[DEBUG] Avanzando flujo a: final")
                         
                         # No mostrar el mensaje de transferencia, solo agregar al historial
                         context.add_message("Asistente", process_response_for_display(response_text))
                         
-                        # Ejecutar turno extra del orquestador
-                        extra_input = "Concluye la sesión con un mensaje breve y positivo"
+                        # Ejecutar turno extra del orquestador - con un input que no solicite explicación
+                        extra_input = "Concluye la conversación brevemente sin explicaciones adicionales"
                         extra_result = await Runner.run(
                             orchestrator,
                             input=extra_input,
